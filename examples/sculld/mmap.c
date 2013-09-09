@@ -15,9 +15,8 @@
  * $Id: _mmap.c.in,v 1.13 2004/10/18 18:07:36 corbet Exp $
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
-
+#include <linux/fs.h>
 #include <linux/mm.h>		/* everything */
 #include <linux/errno.h>	/* error codes */
 #include <asm/pgtable.h>
@@ -56,7 +55,12 @@ void sculld_vma_close(struct vm_area_struct *vma)
  * pages from a multipage block: when they are unmapped, their count
  * is individually decreased, and would drop to 0.
  */
-
+int sculld_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+	/* TBD */
+	return 0;
+}
+#if 0
 struct page *sculld_vma_nopage(struct vm_area_struct *vma,
                                 unsigned long address, int *type)
 {
@@ -90,13 +94,13 @@ struct page *sculld_vma_nopage(struct vm_area_struct *vma,
 	up(&dev->sem);
 	return page;
 }
-
+#endif
 
 
 struct vm_operations_struct sculld_vm_ops = {
 	.open =     sculld_vma_open,
 	.close =    sculld_vma_close,
-	.nopage =   sculld_vma_nopage,
+	.fault = sculld_vma_fault,
 };
 
 

@@ -15,7 +15,6 @@
  * $Id: _main.c.in,v 1.21 2004/10/14 20:11:39 corbet Exp $
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -280,7 +279,7 @@ ssize_t sculld_write (struct file *filp, const char __user *buf, size_t count,
  * The ioctl() implementation
  */
 
-int sculld_ioctl (struct inode *inode, struct file *filp,
+long sculld_ioctl (struct file *filp,
                  unsigned int cmd, unsigned long arg)
 {
 
@@ -409,15 +408,15 @@ loff_t sculld_llseek (struct file *filp, loff_t off, int whence)
 struct async_work {
 	struct kiocb *iocb;
 	int result;
-	struct work_struct work;
+	struct delayed_work dwork;
 };
 
 /*
  * "Complete" an asynchronous operation.
  */
-static void sculld_do_deferred_op(void *p)
+static void sculld_do_deferred_op(struct work_struct *work)
 {
-	struct async_work *stuff = (struct async_work *) p;
+	struct async_work *stuff = container_of(work, struct async_work, dwork.work);
 	aio_complete(stuff->iocb, stuff->result, 0);
 	kfree(stuff);
 }
@@ -445,22 +444,22 @@ static int sculld_defer_op(int write, struct kiocb *iocb, char __user *buf,
 		return result; /* No memory, just complete now */
 	stuff->iocb = iocb;
 	stuff->result = result;
-	INIT_WORK(&stuff->work, sculld_do_deferred_op, stuff);
-	schedule_delayed_work(&stuff->work, HZ/100);
+	INIT_WORK(&stuff->dwork.work, sculld_do_deferred_op);
+	schedule_delayed_work(&stuff->dwork, HZ/100);
 	return -EIOCBQUEUED;
 }
 
 
-static ssize_t sculld_aio_read(struct kiocb *iocb, char __user *buf, size_t count,
+static ssize_t sculld_aio_read(struct kiocb *iocb, const struct iovec *iov, unsigned long count,
 		loff_t pos)
 {
-	return sculld_defer_op(0, iocb, buf, count, pos);
+	return sculld_defer_op(0, iocb, (char __user *) iov->iov_base, iov->iov_len, pos);
 }
 
-static ssize_t sculld_aio_write(struct kiocb *iocb, const char __user *buf,
-		size_t count, loff_t pos)
+static ssize_t sculld_aio_write(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long count, loff_t pos)
 {
-	return sculld_defer_op(1, iocb, (char __user *) buf, count, pos);
+	return sculld_defer_op(1, iocb, (char __user *) iov->iov_base, iov->iov_len, pos);
 }
 
 
@@ -480,7 +479,7 @@ struct file_operations sculld_fops = {
 	.llseek =    sculld_llseek,
 	.read =	     sculld_read,
 	.write =     sculld_write,
-	.ioctl =     sculld_ioctl,
+	.unlocked_ioctl =     sculld_ioctl,
 	.mmap =	     sculld_mmap,
 	.open =	     sculld_open,
 	.release =   sculld_release,
@@ -532,9 +531,9 @@ static void sculld_setup_cdev(struct sculld_dev *dev, int index)
 		printk(KERN_NOTICE "Error %d adding scull%d", err, index);
 }
 
-static ssize_t sculld_show_dev(struct device *ddev, char *buf)
+static ssize_t sculld_show_dev(struct device *ddev, struct device_attribute *attr, char *buf)
 {
-	struct sculld_dev *dev = ddev->driver_data;
+	struct sculld_dev *dev = ddev->platform_data;
 
 	return print_dev_t(buf, dev->cdev.dev);
 }
@@ -546,7 +545,7 @@ static void sculld_register_dev(struct sculld_dev *dev, int index)
 	sprintf(dev->devname, "sculld%d", index);
 	dev->ldev.name = dev->devname;
 	dev->ldev.driver = &sculld_driver;
-	dev->ldev.dev.driver_data = dev;
+	dev->ldev.dev.platform_data = dev;
 	register_ldd_device(&dev->ldev);
 	device_create_file(&dev->ldev.dev, &dev_attr_dev);
 }
