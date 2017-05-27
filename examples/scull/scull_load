@@ -5,10 +5,10 @@ device="scull"
 mode="664"
 
 # Group: since distributions do it differently, look for wheel or use staff
-if grep -q '^staff:' /etc/group; then
-    group="staff"
+if grep -q '^sudo:' /etc/group; then
+    group="sudo"
 else
-    group="wheel"
+    group="adm"
 fi
 
 # invoke insmod with all arguments we got

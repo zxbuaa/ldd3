@@ -9,8 +9,8 @@ else
   DEBFLAGS = -O2
 endif
 
-CFLAGS += $(DEBFLAGS)
-CFLAGS += -I$(LDDINC)
+ccflags-y = $(DEBFLAGS)
+ccflags-y += -I$(LDDINC)
 
 ifneq ($(KERNELRELEASE),)
 # call from kernel build system
@@ -26,18 +26,7 @@ PWD       := $(shell pwd)
 
 modules:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD)/../include modules
-
-endif
-
-
-
 clean:
-	rm -rf *.o *~ core .depend .*.cmd *.ko *.mod.c .tmp_versions
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD)/../include modules clean
 
-depend .depend dep:
-	$(CC) $(CFLAGS) -M *.c > .depend
-
-
-ifeq (.depend,$(wildcard .depend))
-include .depend
 endif
