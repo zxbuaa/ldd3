@@ -241,7 +241,9 @@ int scull_open(struct inode *inode, struct file *filp)
 	filp->private_data = dev; /* for other methods */
 
 	/* now trim to 0 the length of the device if open was write-only */
-	if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
+	if (((filp->f_flags & O_ACCMODE) == O_WRONLY ||
+	     (filp->f_flags & O_ACCMODE) == O_RDWR) &&
+	    (filp->f_flags & O_TRUNC)) {
 		if (down_interruptible(&dev->sem))
 			return -ERESTARTSYS;
 		scull_trim(dev); /* ignore errors */
@@ -343,6 +345,9 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
 
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
+
+	if (filp->f_flags & O_APPEND)
+		*f_pos += dev->size;
 
 	/* find listitem, qset index and offset in the quantum */
 	item = (long)*f_pos / itemsize;
