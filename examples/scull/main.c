@@ -570,7 +570,7 @@ struct file_operations scull_fops = {
  * Thefore, it must be careful to work correctly even if some of the items
  * have not been initialized
  */
-void scull_cleanup_module(void)
+static void scull_cleanup_module(void)
 {
 	int i;
 	dev_t devno = MKDEV(scull_major, scull_minor);
@@ -607,23 +607,23 @@ static void scull_setup_cdev(struct scull_dev *dev, int index)
     
 	cdev_init(&dev->cdev, &scull_fops);
 	dev->cdev.owner = THIS_MODULE;
-	dev->cdev.ops = &scull_fops;
-	err = cdev_add (&dev->cdev, devno, 1);
+	/* A scull_dev corresponds to one cdev */
+	err = cdev_add(&dev->cdev, devno, 1);
 	/* Fail gracefully if need be */
 	if (err)
 		printk(KERN_NOTICE "Error %d adding scull%d", err, index);
 }
 
 
-int scull_init_module(void)
+static int scull_init_module(void)
 {
 	int result, i;
 	dev_t dev = 0;
 
-/*
- * Get a range of minor numbers to work with, asking for a dynamic
- * major unless directed otherwise at load time.
- */
+	/*
+	* Get a range of minor numbers to work with, asking for a dynamic
+	* major unless directed otherwise at load time.
+	*/
 	if (scull_major) {
 		dev = MKDEV(scull_major, scull_minor);
 		result = register_chrdev_region(dev, scull_nr_devs, "scull");
@@ -667,7 +667,7 @@ int scull_init_module(void)
 
 	return 0; /* succeed */
 
-  fail:
+fail:
 	scull_cleanup_module();
 	return result;
 }
