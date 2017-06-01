@@ -303,7 +303,7 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
 		return -ERESTARTSYS;
 
 	if (filp->f_flags & O_APPEND)
-		*f_pos += dev->size;
+		*f_pos = dev->size;
 
 	/* find listitem, qset index and offset in the quantum */
 	item = (long)*f_pos / itemsize;
