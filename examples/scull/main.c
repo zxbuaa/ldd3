@@ -215,7 +215,7 @@ int scull_release(struct inode *inode, struct file *filp)
 /*
  * Follow the list
  */
-struct scull_qset *scull_follow(struct scull_dev *dev, int n)
+static struct scull_qset *scull_follow(struct scull_dev *dev, int n)
 {
 	struct scull_qset *qs = dev->data;
 
