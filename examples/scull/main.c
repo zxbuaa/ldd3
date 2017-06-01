@@ -136,7 +136,7 @@ static int scull_seq_show(struct seq_file *s, void *v)
 /*
  * Tie the sequence operators up.
  */
-static struct seq_operations scull_seq_ops = {
+static const struct seq_operations scull_seq_ops = {
 	.start = scull_seq_start,
 	.next  = scull_seq_next,
 	.stop  = scull_seq_stop,
@@ -236,7 +236,6 @@ static struct scull_qset *scull_follow(struct scull_dev *dev, int n)
 			memset(qs->next, 0, sizeof(struct scull_qset));
 		}
 		qs = qs->next;
-		continue;
 	}
 	return qs;
 }
@@ -378,6 +377,8 @@ long scull_ioctl(struct file *filp,
 	switch(cmd) {
 
 	  case SCULL_IOCRESET:
+		if (! capable (CAP_SYS_ADMIN))
+			return -EPERM;
 		scull_quantum = SCULL_QUANTUM;
 		scull_qset = SCULL_QSET;
 		break;
@@ -406,8 +407,11 @@ long scull_ioctl(struct file *filp,
 			return -EPERM;
 		tmp = scull_quantum;
 		retval = __get_user(scull_quantum, (int __user *)arg);
-		if (retval == 0)
+		if (retval == 0) {
 			retval = __put_user(tmp, (int __user *)arg);
+			if (retval)
+				scull_quantum = tmp;
+		}
 		break;
 
 	  case SCULL_IOCHQUANTUM: /* sHift: like Tell + Query */
@@ -441,8 +445,11 @@ long scull_ioctl(struct file *filp,
 			return -EPERM;
 		tmp = scull_qset;
 		retval = __get_user(scull_qset, (int __user *)arg);
-		if (retval == 0)
+		if (retval == 0) {
 			retval = put_user(tmp, (int __user *)arg);
+			if (retval)
+				scull_qset = tmp;
+		}
 		break;
 
 	  case SCULL_IOCHQSET:
@@ -485,15 +492,15 @@ loff_t scull_llseek(struct file *filp, loff_t off, int whence)
 	loff_t newpos;
 
 	switch(whence) {
-	  case 0: /* SEEK_SET */
+	  case SEEK_SET:
 		newpos = off;
 		break;
 
-	  case 1: /* SEEK_CUR */
+	  case SEEK_CUR:
 		newpos = filp->f_pos + off;
 		break;
 
-	  case 2: /* SEEK_END */
+	  case SEEK_END:
 		newpos = dev->size + off;
 		break;
 
