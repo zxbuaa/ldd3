@@ -51,7 +51,7 @@ module_param(scull_qset, int, S_IRUGO);
 MODULE_AUTHOR("Alessandro Rubini, Jonathan Corbet");
 MODULE_LICENSE("Dual BSD/GPL");
 
-struct scull_dev *scull_devices;	/* allocated in scull_init_module */
+LIST_HEAD(scull_devices);
 
 
 /*
@@ -91,17 +91,18 @@ int scull_trim(struct scull_dev *dev)
  */
 static void *scull_seq_start(struct seq_file *s, loff_t *pos)
 {
-	if (*pos >= scull_nr_devs)
-		return NULL;   /* No more to read */
-	return scull_devices + *pos;
+	struct list_head *list = seq_list_start(&scull_devices, *pos);
+	if (list == &scull_devices)
+		return NULL;
+	return list;
 }
 
 static void *scull_seq_next(struct seq_file *s, void *v, loff_t *pos)
 {
-	(*pos)++;
-	if (*pos >= scull_nr_devs)
+	struct list_head *list = seq_list_next(v, &scull_devices, pos);
+	if (list == &scull_devices)
 		return NULL;
-	return scull_devices + *pos;
+	return list;
 }
 
 static void scull_seq_stop(struct seq_file *s, void *v)
@@ -111,14 +112,14 @@ static void scull_seq_stop(struct seq_file *s, void *v)
 
 static int scull_seq_show(struct seq_file *s, void *v)
 {
-	struct scull_dev *dev = (struct scull_dev *) v;
+	struct scull_dev *dev = container_of(v, struct scull_dev, list);
 	struct scull_qset *d;
 	int i;
 
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
 	seq_printf(s, "\nDevice %i: qset %i, q %i, sz %li\n",
-			(int) (dev - scull_devices), dev->qset,
+			dev->id, dev->qset,
 			dev->quantum, dev->size);
 	for (d = dev->data; d; d = d->next) { /* scan the list */
 		seq_printf(s, "  item at %p, qset at %p\n", d, d->data);
@@ -535,16 +536,15 @@ struct file_operations scull_fops = {
  */
 static void scull_cleanup_module(void)
 {
-	int i;
+	struct list_head *list, *temp;
 	dev_t devno = MKDEV(scull_major, scull_minor);
 
 	/* Get rid of our char dev entries */
-	if (scull_devices) {
-		for (i = 0; i < scull_nr_devs; i++) {
-			scull_trim(scull_devices + i);
-			cdev_del(&scull_devices[i].cdev);
-		}
-		kfree(scull_devices);
+	list_for_each_safe(list, temp, &scull_devices) {
+		struct scull_dev *scull_dev = container_of(list, struct scull_dev, list);
+		scull_trim(scull_dev);
+		cdev_del(&scull_dev->cdev);
+		kfree(scull_dev);
 	}
 
 #ifdef SCULL_DEBUG /* use proc only if debugging */
@@ -604,19 +604,18 @@ static int scull_init_module(void)
 	 * allocate the devices -- we can't have them static, as the number
 	 * can be specified at load time
 	 */
-	scull_devices = kmalloc(scull_nr_devs * sizeof(struct scull_dev), GFP_KERNEL);
-	if (!scull_devices) {
-		result = -ENOMEM;
-		goto fail;  /* Make this more graceful */
-	}
-	memset(scull_devices, 0, scull_nr_devs * sizeof(struct scull_dev));
-
-        /* Initialize each device. */
 	for (i = 0; i < scull_nr_devs; i++) {
-		scull_devices[i].quantum = scull_quantum;
-		scull_devices[i].qset = scull_qset;
-		sema_init(&scull_devices[i].sem, 1);
-		scull_setup_cdev(&scull_devices[i], i);
+		struct scull_dev *scull_dev = kzalloc(sizeof(struct scull_dev), GFP_KERNEL);
+		if (!scull_dev) {
+			result = -ENOMEM;
+			goto fail;
+		}
+		list_add_tail(&scull_dev->list, &scull_devices);
+		scull_dev->id = i;
+		scull_dev->quantum = scull_quantum;
+		scull_dev->qset = scull_qset;
+		sema_init(&scull_dev->sem, 1);
+		scull_setup_cdev(scull_dev, i);
 	}
 
         /* At this point call the init function for any friend device */
