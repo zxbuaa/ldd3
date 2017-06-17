@@ -116,7 +116,7 @@ static int scull_seq_show(struct seq_file *s, void *v)
 	struct scull_qset *d;
 	int i;
 
-	if (down_interruptible(&dev->sem))
+	if (mutex_lock_interruptible(&dev->lock))
 		return -ERESTARTSYS;
 	seq_printf(s, "\nDevice %i: qset %i, q %i, sz %li\n",
 			dev->id, dev->qset,
@@ -130,7 +130,7 @@ static int scull_seq_show(struct seq_file *s, void *v)
 							i, d->data[i]);
 			}
 	}
-	up(&dev->sem);
+	mutex_unlock(&dev->lock);
 	return 0;
 }
 	
@@ -201,10 +201,10 @@ int scull_open(struct inode *inode, struct file *filp)
 	if (((filp->f_flags & O_ACCMODE) == O_WRONLY ||
 	     (filp->f_flags & O_ACCMODE) == O_RDWR) &&
 	    (filp->f_flags & O_TRUNC)) {
-		if (down_interruptible(&dev->sem))
+		if (mutex_lock_interruptible(&dev->lock))
 			return -ERESTARTSYS;
 		scull_trim(dev); /* ignore errors */
-		up(&dev->sem);
+		mutex_unlock(&dev->lock);
 	}
 	return 0;          /* success */
 }
@@ -255,7 +255,7 @@ ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
 	int item, s_pos, q_pos, rest;
 	ssize_t retval = 0;
 
-	if (down_interruptible(&dev->sem))
+	if (mutex_lock_interruptible(&dev->lock))
 		return -ERESTARTSYS;
 	if (*f_pos >= dev->size)
 		goto out;
@@ -285,7 +285,7 @@ ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
 	retval = count;
 
   out:
-	up(&dev->sem);
+  	mutex_unlock(&dev->lock);
 	return retval;
 }
 
@@ -299,7 +299,7 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
 	int item, s_pos, q_pos, rest;
 	ssize_t retval = -ENOMEM; /* value used in "goto out" statements */
 
-	if (down_interruptible(&dev->sem))
+	if (mutex_lock_interruptible(&dev->lock))
 		return -ERESTARTSYS;
 
 	if (filp->f_flags & O_APPEND)
@@ -341,7 +341,7 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
 		dev->size = *f_pos;
 
   out:
-	up(&dev->sem);
+  	mutex_unlock(&dev->lock);
 	return retval;
 }
 
@@ -614,7 +614,7 @@ static int scull_init_module(void)
 		scull_dev->id = i;
 		scull_dev->quantum = scull_quantum;
 		scull_dev->qset = scull_qset;
-		sema_init(&scull_dev->sem, 1);
+		mutex_init(&scull_dev->lock);
 		scull_setup_cdev(scull_dev, i);
 	}
 
