@@ -17,7 +17,7 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-
+#include <linux/cdev.h>
 #include <linux/sched.h>  /* current and everything */
 #include <linux/kernel.h> /* printk() */
 #include <linux/fs.h>     /* everything... */
@@ -28,9 +28,9 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 static int complete_major = 0;
 
-DECLARE_COMPLETION(comp);
+static DECLARE_COMPLETION(comp);
 
-ssize_t complete_read (struct file *filp, char __user *buf, size_t count, loff_t *pos)
+static ssize_t complete_read (struct file *filp, char __user *buf, size_t count, loff_t *pos)
 {
 	printk(KERN_DEBUG "process %i (%s) going to sleep\n",
 			current->pid, current->comm);
@@ -39,41 +39,70 @@ ssize_t complete_read (struct file *filp, char __user *buf, size_t count, loff_t
 	return 0; /* EOF */
 }
 
-ssize_t complete_write (struct file *filp, const char __user *buf, size_t count,
+static ssize_t complete_write (struct file *filp, const char __user *buf, size_t count,
 		loff_t *pos)
 {
 	printk(KERN_DEBUG "process %i (%s) awakening the readers...\n",
 			current->pid, current->comm);
-	complete(&comp);
+	if (!strncmp(buf, "all", 3))
+		complete_all(&comp);
+	else
+		complete(&comp);
 	return count; /* succeed, to avoid retrial */
 }
 
 
-struct file_operations complete_fops = {
+static struct file_operations complete_fops = {
 	.owner = THIS_MODULE,
 	.read =  complete_read,
 	.write = complete_write,
 };
 
+static struct cdev *complete_cdev;
+static dev_t complete_devno;
 
-int complete_init(void)
+static int complete_init(void)
 {
 	int result;
 
 	/*
 	 * Register your major, and accept a dynamic number
 	 */
-	result = register_chrdev(complete_major, "complete", &complete_fops);
+	if (complete_major) {
+		complete_devno = MKDEV(complete_major, 0);
+		result  = register_chrdev_region(complete_devno, 1, "complete");
+	} else {
+		result = alloc_chrdev_region(&complete_devno, 0, 1, "complete");
+		complete_major = MAJOR(complete_devno);
+	}
 	if (result < 0)
-		return result;
-	if (complete_major == 0)
-		complete_major = result; /* dynamic */
+		goto register_chrdev_failed;
+
+	complete_cdev = cdev_alloc();
+	if (!complete_cdev) {
+		result = -ENOMEM;
+		goto cdev_alloc_failed;
+	}
+	cdev_init(complete_cdev, &complete_fops);
+	complete_cdev->owner = THIS_MODULE;
+	result = cdev_add(complete_cdev, complete_devno, 1);
+	if (result < 0)
+		goto cdev_add_failed;
+
 	return 0;
+
+cdev_add_failed:
+	cdev_del(complete_cdev);
+cdev_alloc_failed:
+	unregister_chrdev_region(complete_devno, 1);
+register_chrdev_failed:
+	return result;
 }
 
-void complete_cleanup(void)
+static void complete_cleanup(void)
 {
-	unregister_chrdev(complete_major, "complete");
+	cdev_del(complete_cdev);
+	unregister_chrdev_region(complete_devno, 1);
 }
 
 module_init(complete_init);
