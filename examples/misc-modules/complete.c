@@ -59,21 +59,21 @@ static struct file_operations complete_fops = {
 };
 
 static struct cdev *complete_cdev;
-static dev_t complete_devno;
 
 static int complete_init(void)
 {
+	static dev_t devno;
 	int result;
 
 	/*
 	 * Register your major, and accept a dynamic number
 	 */
 	if (complete_major) {
-		complete_devno = MKDEV(complete_major, 0);
-		result  = register_chrdev_region(complete_devno, 1, "complete");
+		devno = MKDEV(complete_major, 0);
+		result  = register_chrdev_region(devno, 1, "complete");
 	} else {
-		result = alloc_chrdev_region(&complete_devno, 0, 1, "complete");
-		complete_major = MAJOR(complete_devno);
+		result = alloc_chrdev_region(&devno, 0, 1, "complete");
+		complete_major = MAJOR(devno);
 	}
 	if (result < 0)
 		goto register_chrdev_failed;
@@ -85,7 +85,7 @@ static int complete_init(void)
 	}
 	cdev_init(complete_cdev, &complete_fops);
 	complete_cdev->owner = THIS_MODULE;
-	result = cdev_add(complete_cdev, complete_devno, 1);
+	result = cdev_add(complete_cdev, devno, 1);
 	if (result < 0)
 		goto cdev_add_failed;
 
@@ -94,15 +94,16 @@ static int complete_init(void)
 cdev_add_failed:
 	cdev_del(complete_cdev);
 cdev_alloc_failed:
-	unregister_chrdev_region(complete_devno, 1);
+	unregister_chrdev_region(devno, 1);
 register_chrdev_failed:
 	return result;
 }
 
 static void complete_cleanup(void)
 {
+	dev_t devno = MKDEV(complete_major, 0);
 	cdev_del(complete_cdev);
-	unregister_chrdev_region(complete_devno, 1);
+	unregister_chrdev_region(devno, 1);
 }
 
 module_init(complete_init);
