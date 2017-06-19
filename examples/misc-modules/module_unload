@@ -1,6 +1,13 @@
 #!/bin/sh
-module="complete"
-device="complete"
+
+if [ $# -lt 1 ]; then
+	echo "Usage: $0 module_name" >&2
+	exit 1
+fi
+
+module=$1
+device=$1
+shift
 
 # invoke rmmod with all arguments we got
 /sbin/rmmod $module $* || exit 1

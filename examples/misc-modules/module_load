@@ -1,7 +1,14 @@
 #!/bin/sh
 # $Id: scull_load,v 1.4 2004/11/03 06:19:49 rubini Exp $
-module="complete"
-device="complete"
+
+if [ $# -lt 1 ]; then
+	echo "Usage: $0 module_name" >&2
+	exit 1
+fi
+
+module=$1
+device=$1
+shift
 mode="664"
 
 # Group: since distributions do it differently, look for wheel or use staff
