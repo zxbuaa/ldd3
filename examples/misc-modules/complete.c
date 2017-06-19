@@ -42,12 +42,19 @@ static ssize_t complete_read (struct file *filp, char __user *buf, size_t count,
 static ssize_t complete_write (struct file *filp, const char __user *buf, size_t count,
 		loff_t *pos)
 {
-	printk(KERN_DEBUG "process %i (%s) awakening the readers...\n",
+	if (!strncmp(buf, "reset", 5)) {
+		printk(KERN_DEBUG "process %i (%s) reseting the completion...\n",
 			current->pid, current->comm);
-	if (!strncmp(buf, "all", 3))
+		init_completion(&comp);
+	} else if (!strncmp(buf, "all", 3)) {
+		printk(KERN_DEBUG "process %i (%s) awakening all the readers...\n",
+			current->pid, current->comm);
 		complete_all(&comp);
-	else
+	} else {
+		printk(KERN_DEBUG "process %i (%s) awakening one single reader...\n",
+			current->pid, current->comm);
 		complete(&comp);
+	}
 	return count; /* succeed, to avoid retrial */
 }
 
