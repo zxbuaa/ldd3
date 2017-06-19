@@ -84,7 +84,7 @@ static int sleepy_init(void)
 		goto cdev_alloc_failed;
 	}
 	cdev_init(cdev, &sleepy_fops);
-	cdev->owner = THIS_MODULE;
+	cdev->owner = sleepy_fops.owner;
 	result = cdev_add(cdev, devno, 1);
 	if (result < 0)
 		goto cdev_add_failed;
