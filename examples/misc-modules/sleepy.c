@@ -23,20 +23,22 @@
 #include <linux/fs.h>     /* everything... */
 #include <linux/types.h>  /* size_t */
 #include <linux/wait.h>
+#include <linux/bitops.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
 
 static int sleepy_major = 0;
 
 static DECLARE_WAIT_QUEUE_HEAD(wq);
-static int flag = 0;
+static unsigned long flag = 0;
 
 static ssize_t sleepy_read (struct file *filp, char __user *buf, size_t count, loff_t *pos)
 {
 	printk(KERN_DEBUG "process %i (%s) going to sleep\n",
 			current->pid, current->comm);
-	wait_event_interruptible(wq, flag != 0);
-	flag = 0;
+	do {
+		wait_event_interruptible(wq, flag != 0);
+	} while (!test_and_clear_bit(0, &flag));
 	printk(KERN_DEBUG "awoken %i (%s)\n", current->pid, current->comm);
 	return 0; /* EOF */
 }
@@ -46,7 +48,7 @@ static ssize_t sleepy_write (struct file *filp, const char __user *buf, size_t c
 {
 	printk(KERN_DEBUG "process %i (%s) awakening the readers...\n",
 			current->pid, current->comm);
-	flag = 1;
+	set_bit(0, &flag);
 	wake_up_interruptible(&wq);
 	return count; /* succeed, to avoid retrial */
 }
