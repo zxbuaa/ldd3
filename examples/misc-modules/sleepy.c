@@ -17,7 +17,7 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-
+#include <linux/cdev.h>
 #include <linux/sched.h>  /* current and everything */
 #include <linux/kernel.h> /* printk() */
 #include <linux/fs.h>     /* everything... */
@@ -31,7 +31,7 @@ static int sleepy_major = 0;
 static DECLARE_WAIT_QUEUE_HEAD(wq);
 static int flag = 0;
 
-ssize_t sleepy_read (struct file *filp, char __user *buf, size_t count, loff_t *pos)
+static ssize_t sleepy_read (struct file *filp, char __user *buf, size_t count, loff_t *pos)
 {
 	printk(KERN_DEBUG "process %i (%s) going to sleep\n",
 			current->pid, current->comm);
@@ -41,7 +41,7 @@ ssize_t sleepy_read (struct file *filp, char __user *buf, size_t count, loff_t *
 	return 0; /* EOF */
 }
 
-ssize_t sleepy_write (struct file *filp, const char __user *buf, size_t count,
+static ssize_t sleepy_write (struct file *filp, const char __user *buf, size_t count,
 		loff_t *pos)
 {
 	printk(KERN_DEBUG "process %i (%s) awakening the readers...\n",
@@ -52,31 +52,58 @@ ssize_t sleepy_write (struct file *filp, const char __user *buf, size_t count,
 }
 
 
-struct file_operations sleepy_fops = {
+static struct file_operations sleepy_fops = {
 	.owner = THIS_MODULE,
 	.read =  sleepy_read,
 	.write = sleepy_write,
 };
 
+static struct cdev *cdev; 
 
-int sleepy_init(void)
+static int sleepy_init(void)
 {
+	dev_t devno;
 	int result;
 
 	/*
 	 * Register your major, and accept a dynamic number
 	 */
-	result = register_chrdev(sleepy_major, "sleepy", &sleepy_fops);
+	if (sleepy_major) {
+		devno = MKDEV(sleepy_major, 0);
+		result = register_chrdev_region(devno, 1, "sleepy");
+	} else {
+		result = alloc_chrdev_region(&devno, sleepy_major, 1, "sleepy");
+		sleepy_major = MAJOR(devno);
+	}
 	if (result < 0)
-		return result;
-	if (sleepy_major == 0)
-		sleepy_major = result; /* dynamic */
+		goto register_chrdev_region_failed;
+
+	cdev = cdev_alloc();
+	if (!cdev) {
+		result = -ENOMEM;
+		goto cdev_alloc_failed;
+	}
+	cdev_init(cdev, &sleepy_fops);
+	cdev->owner = THIS_MODULE;
+	result = cdev_add(cdev, devno, 1);
+	if (result < 0)
+		goto cdev_add_failed;
+
 	return 0;
+
+cdev_add_failed:
+	cdev_del(cdev);
+cdev_alloc_failed:
+	unregister_chrdev_region(devno, 1);
+register_chrdev_region_failed:
+	return result;
 }
 
-void sleepy_cleanup(void)
+static void sleepy_cleanup(void)
 {
-	unregister_chrdev(sleepy_major, "sleepy");
+	dev_t devno = MKDEV(sleepy_major, 0);
+	cdev_del(cdev);
+	unregister_chrdev_region(devno, 1);
 }
 
 module_init(sleepy_init);
