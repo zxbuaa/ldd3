@@ -152,6 +152,7 @@ static int jitimer_seq_show(struct seq_file *m, void *v)
 {
 	struct jit_data *data;
 	unsigned long j = jiffies;
+	int retval;
 
 	data = kmalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
@@ -178,11 +179,11 @@ static int jitimer_seq_show(struct seq_file *m, void *v)
 	add_timer(&data->timer);
 
 	/* wait for the buffer to fill */
-	wait_event_interruptible(data->wait, !data->loops);
-	if (signal_pending(current))
-		return -ERESTARTSYS;
+	retval = wait_event_interruptible(data->wait, !data->loops);
+	if (retval)
+		del_timer_sync(&data->timer);
 	kfree(data);
-	return 0;
+	return retval;
 }
 
 static void jit_tasklet_fn(unsigned long arg)
@@ -210,6 +211,7 @@ static int jitasklet_seq_show(struct seq_file *m, void *v)
 	struct jit_data *data;
 	unsigned long j = jiffies;
 	long hi = (long)m->private;
+	int retval;
 
 	data = kmalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
@@ -237,12 +239,11 @@ static int jitasklet_seq_show(struct seq_file *m, void *v)
 		tasklet_schedule(&data->tlet);
 
 	/* wait for the buffer to fill */
-	wait_event_interruptible(data->wait, !data->loops);
-
-	if (signal_pending(current))
-		return -ERESTARTSYS;
+	retval = wait_event_interruptible(data->wait, !data->loops);
+	if (retval)
+		tasklet_kill(&data->tlet);
 	kfree(data);
-	return 0;
+	return retval;
 }
 
 static int jit_single_open(struct inode *inode, struct file *file)
