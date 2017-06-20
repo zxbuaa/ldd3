@@ -15,11 +15,10 @@
  * $Id: jiq.c,v 1.7 2004/09/26 07:02:43 gregkh Exp $
  */
  
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
-
+#include <linux/seq_file.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>     /* everything... */
@@ -28,6 +27,7 @@
 #include <linux/workqueue.h>
 #include <linux/preempt.h>
 #include <linux/interrupt.h> /* tasklets */
+#include <linux/wait.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
 
@@ -43,7 +43,7 @@ module_param(delay, long, 0);
  * that show how enqueued tasks `feel' the environment
  */
 
-#define LIMIT	(PAGE_SIZE-128)	/* don't print any more after this size */
+#define MAX_COUNT	5
 
 /*
  * Print information about the current environment. This is called from
@@ -52,23 +52,17 @@ module_param(delay, long, 0);
  */
 static DECLARE_WAIT_QUEUE_HEAD (jiq_wait);
 
-
-static struct work_struct jiq_work;
-
-
-
 /*
  * Keep track of info we need between task queue runs.
  */
 static struct clientdata {
-	int len;
-	char *buf;
+	struct delayed_work dwork;
+	struct seq_file *seq_file;
 	unsigned long jiffies;
 	long delay;
+	int count;
+	bool done;
 } jiq_data;
-
-#define SCHEDULER_QUEUE ((task_queue *) 1)
-
 
 
 static void jiq_print_tasklet(unsigned long);
@@ -78,32 +72,26 @@ static DECLARE_TASKLET(jiq_tasklet, jiq_print_tasklet, (unsigned long)&jiq_data)
 /*
  * Do the printing; return non-zero if the task should be rescheduled.
  */
-static int jiq_print(void *ptr)
+static int jiq_print(struct clientdata *data)
 {
-	struct clientdata *data = ptr;
-	int len = data->len;
-	char *buf = data->buf;
 	unsigned long j = jiffies;
 
-	if (len > LIMIT) { 
+	if (data->count > MAX_COUNT - 1) {
+		data->done = true;
 		wake_up_interruptible(&jiq_wait);
 		return 0;
 	}
-
-	if (len == 0)
-		len = sprintf(buf,"    time  delta preempt   pid cpu command\n");
-	else
-		len =0;
+	if (!data->count)
+		seq_printf(data->seq_file, "    time  delta preempt   pid cpu command\n");
 
   	/* intr_count is only exported since 1.3.5, but 1.99.4 is needed anyways */
-	len += sprintf(buf+len, "%9li  %4li     %3i %5i %3i %s\n",
+	seq_printf(data->seq_file, "%9li  %4li     %3i %5i %3i %s\n",
 			j, j - data->jiffies,
 			preempt_count(), current->pid, smp_processor_id(),
 			current->comm);
 
-	data->len += len;
-	data->buf += len;
 	data->jiffies = j;
+	data->count++;
 	return 1;
 }
 
@@ -111,58 +99,52 @@ static int jiq_print(void *ptr)
 /*
  * Call jiq_print from a work queue
  */
-static void jiq_print_wq(void *ptr)
+static void jiq_print_wq(struct work_struct *work)
 {
-	struct clientdata *data = (struct clientdata *) ptr;
+	struct clientdata *data = container_of(work, struct clientdata, dwork.work);
     
-	if (! jiq_print (ptr))
+	if (!jiq_print(data))
 		return;
     
 	if (data->delay)
-		schedule_delayed_work(&jiq_work, data->delay);
+		schedule_delayed_work(&data->dwork, data->delay);
 	else
-		schedule_work(&jiq_work);
+		schedule_work(&data->dwork.work);
 }
 
 
 
-static int jiq_read_wq(char *buf, char **start, off_t offset,
-                   int len, int *eof, void *data)
+static int jiqwq_seq_show(struct seq_file *m, void *v)
 {
-	DEFINE_WAIT(wait);
+	struct clientdata *data = m->private;
 	
-	jiq_data.len = 0;                /* nothing printed, yet */
-	jiq_data.buf = buf;              /* print in this place */
-	jiq_data.jiffies = jiffies;      /* initial time */
-	jiq_data.delay = 0;
-    
-	prepare_to_wait(&jiq_wait, &wait, TASK_INTERRUPTIBLE);
-	schedule_work(&jiq_work);
-	schedule();
-	finish_wait(&jiq_wait, &wait);
+	data->seq_file = m;
+	data->jiffies = jiffies;      /* initial time */
+	data->delay = 0;
+	data->count = 0;
+	data->done = false;
 
-	*eof = 1;
-	return jiq_data.len;
+	schedule_work(&data->dwork.work);
+	wait_event_interruptible(jiq_wait, data->done);
+
+	return 0;
 }
 
 
-static int jiq_read_wq_delayed(char *buf, char **start, off_t offset,
-                   int len, int *eof, void *data)
+static int jiqwqdelay_seq_show(struct seq_file *m, void *v)
 {
-	DEFINE_WAIT(wait);
+	struct clientdata *data = m->private;
 	
-	jiq_data.len = 0;                /* nothing printed, yet */
-	jiq_data.buf = buf;              /* print in this place */
-	jiq_data.jiffies = jiffies;      /* initial time */
-	jiq_data.delay = delay;
+	data->seq_file = m;
+	data->jiffies = jiffies;      /* initial time */
+	data->delay = delay;
+	data->count = 0;
+	data->done = false;
     
-	prepare_to_wait(&jiq_wait, &wait, TASK_INTERRUPTIBLE);
-	schedule_delayed_work(&jiq_work, delay);
-	schedule();
-	finish_wait(&jiq_wait, &wait);
+	schedule_delayed_work(&data->dwork, delay);
+	wait_event_interruptible(jiq_wait, data->done);
 
-	*eof = 1;
-	return jiq_data.len;
+	return 0;
 }
 
 
@@ -173,24 +155,25 @@ static int jiq_read_wq_delayed(char *buf, char **start, off_t offset,
  */
 static void jiq_print_tasklet(unsigned long ptr)
 {
-	if (jiq_print ((void *) ptr))
-		tasklet_schedule (&jiq_tasklet);
+	if (!jiq_print((struct clientdata *)ptr))
+		return;
+	tasklet_schedule(&jiq_tasklet);
 }
 
 
 
-static int jiq_read_tasklet(char *buf, char **start, off_t offset, int len,
-                int *eof, void *data)
+static int jiqtasklet_seq_show(struct seq_file *m, void *v)
 {
-	jiq_data.len = 0;                /* nothing printed, yet */
-	jiq_data.buf = buf;              /* print in this place */
-	jiq_data.jiffies = jiffies;      /* initial time */
+	struct clientdata *data = m->private;
+	data->seq_file = m;
+	data->jiffies = jiffies;      /* initial time */
+	data->count = 0;
+	data->done = false;
 
 	tasklet_schedule(&jiq_tasklet);
-	interruptible_sleep_on(&jiq_wait);    /* sleep till completion */
+	wait_event_interruptible(jiq_wait, data->done);
 
-	*eof = 1;
-	return jiq_data.len;
+	return 0;
 }
 
 
@@ -204,34 +187,60 @@ static struct timer_list jiq_timer;
 
 static void jiq_timedout(unsigned long ptr)
 {
-	jiq_print((void *)ptr);            /* print a line */
-	wake_up_interruptible(&jiq_wait);  /* awake the process */
+	struct clientdata *data = (struct clientdata *)ptr;
+	if (!jiq_print(data))
+		return;
+	jiq_timer.expires += data->delay;
+	add_timer(&jiq_timer);
 }
 
 
-static int jiq_read_run_timer(char *buf, char **start, off_t offset,
-                   int len, int *eof, void *data)
+static int jiqtimer_seq_show(struct seq_file *m, void *v)
 {
+	struct clientdata *data = m->private;
 
-	jiq_data.len = 0;           /* prepare the argument for jiq_print() */
-	jiq_data.buf = buf;
-	jiq_data.jiffies = jiffies;
+	data->seq_file = m;
+	data->jiffies = jiffies;
+	data->delay = delay;
+	data->count = 0;
+	data->done = false;
 
 	init_timer(&jiq_timer);              /* init the timer structure */
 	jiq_timer.function = jiq_timedout;
-	jiq_timer.data = (unsigned long)&jiq_data;
-	jiq_timer.expires = jiffies + HZ; /* one second */
+	jiq_timer.data = (unsigned long)data;
+	jiq_timer.expires = jiffies + delay; /* one second */
 
-	jiq_print(&jiq_data);   /* print and go to sleep */
+	jiq_print(data);   /* print and go to sleep */
 	add_timer(&jiq_timer);
-	interruptible_sleep_on(&jiq_wait);  /* RACE */
+	wait_event_interruptible(jiq_wait, data->done);
 	del_timer_sync(&jiq_timer);  /* in case a signal woke us up */
-    
-	*eof = 1;
-	return jiq_data.len;
+
+	return 0;
 }
 
+static int jiq_single_open(struct inode *inode, struct file *file)
+{
+	unsigned char *name = file->f_path.dentry->d_iname;
+	int retval = 0;
 
+	if (!strcmp(name, "jiqwq"))
+		retval = single_open(file, jiqwq_seq_show, (void *)&jiq_data);
+	else if (!strcmp(name, "jiqwqdelay"))
+		retval = single_open(file, jiqwqdelay_seq_show, (void *)&jiq_data);
+	else if (!strcmp(name, "jiqtimer"))
+		retval = single_open(file, jiqtimer_seq_show, (void *)&jiq_data);
+	else if (!strcmp(name, "jiqtasklet"))
+		retval = single_open(file, jiqtasklet_seq_show, (void *)&jiq_data);
+	return retval;
+}
+
+static struct file_operations jiq_read_fops = {
+	.owner = THIS_MODULE,
+	.open = jiq_single_open,
+	.release = single_release,
+	.read = seq_read,
+	.llseek = seq_lseek,
+};
 
 /*
  * the init/clean material
@@ -241,12 +250,12 @@ static int jiq_init(void)
 {
 
 	/* this line is in jiq_init() */
-	INIT_WORK(&jiq_work, jiq_print_wq, &jiq_data);
+	INIT_DELAYED_WORK(&jiq_data.dwork, jiq_print_wq);
 
-	create_proc_read_entry("jiqwq", 0, NULL, jiq_read_wq, NULL);
-	create_proc_read_entry("jiqwqdelay", 0, NULL, jiq_read_wq_delayed, NULL);
-	create_proc_read_entry("jitimer", 0, NULL, jiq_read_run_timer, NULL);
-	create_proc_read_entry("jiqtasklet", 0, NULL, jiq_read_tasklet, NULL);
+	proc_create("jiqwq", 0, NULL, &jiq_read_fops);
+	proc_create("jiqwqdelay", 0, NULL, &jiq_read_fops);
+	proc_create("jiqtimer", 0, NULL, &jiq_read_fops);
+	proc_create("jiqtasklet", 0, NULL, &jiq_read_fops);
 
 	return 0; /* succeed */
 }
@@ -255,7 +264,7 @@ static void jiq_cleanup(void)
 {
 	remove_proc_entry("jiqwq", NULL);
 	remove_proc_entry("jiqwqdelay", NULL);
-	remove_proc_entry("jitimer", NULL);
+	remove_proc_entry("jiqtimer", NULL);
 	remove_proc_entry("jiqtasklet", NULL);
 }
 
