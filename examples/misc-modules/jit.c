@@ -55,13 +55,14 @@ enum jit_files {
  */
 static int sleep_seq_show(struct seq_file *m, void *v)
 {
-	unsigned long j1; /* jiffies */
+	unsigned long j0, j1; /* jiffies */
 	wait_queue_head_t wait;
 	long remaining;
 	int retval = 0;
 
 	init_waitqueue_head (&wait);
-	j1 = jiffies + delay;
+	j0 = jiffies;
+	j1 = j0 + delay;
 
 	switch((long)m->private) {
 		case JIT_BUSY:
