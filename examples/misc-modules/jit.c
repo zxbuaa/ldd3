@@ -55,12 +55,13 @@ enum jit_files {
  */
 static int sleep_seq_show(struct seq_file *m, void *v)
 {
-	unsigned long j0, j1; /* jiffies */
+	unsigned long j1; /* jiffies */
 	wait_queue_head_t wait;
+	long remaining;
+	int retval = 0;
 
 	init_waitqueue_head (&wait);
-	j0 = jiffies;
-	j1 = j0 + delay;
+	j1 = jiffies + delay;
 
 	switch((long)m->private) {
 		case JIT_BUSY:
@@ -68,22 +69,25 @@ static int sleep_seq_show(struct seq_file *m, void *v)
 				cpu_relax();
 			break;
 		case JIT_SCHED:
-			while (time_before(jiffies, j1)) {
+			while (time_before(jiffies, j1))
 				schedule();
-			}
 			break;
 		case JIT_QUEUE:
-			wait_event_interruptible_timeout(wait, 0, delay);
+			if ((retval = wait_event_interruptible_timeout(wait, false, j1 - jiffies)) < 0)
+				printk(KERN_ALERT "remain %lu, return %d\n", j1 - jiffies, retval);
 			break;
 		case JIT_SCHEDTO:
 			set_current_state(TASK_INTERRUPTIBLE);
-			schedule_timeout (delay);
+			if ((remaining = schedule_timeout(j1 - jiffies))) {
+				printk(KERN_ALERT "remain %lu, return %ld\n", j1 - jiffies, remaining);
+				retval = -ERESTARTSYS;
+			}
 			break;
 	}
 	j1 = jiffies; /* actual value after we delayed */
 
 	seq_printf(m, "%9li %9li\n", j0, j1);
-	return 0;
+	return retval;
 }
 
 /*
