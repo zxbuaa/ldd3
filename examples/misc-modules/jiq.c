@@ -34,9 +34,8 @@ MODULE_LICENSE("Dual BSD/GPL");
 /*
  * The delay for the delayed workqueue timer file.
  */
-static long delay = 1;
+static long delay = HZ;
 module_param(delay, long, 0);
-
 
 /*
  * This module is a silly one: it only embeds short code fragments
@@ -64,10 +63,8 @@ static struct clientdata {
 	int count;
 } jiq_data;
 
-
 static void jiq_print_tasklet(unsigned long);
 static DECLARE_TASKLET(jiq_tasklet, jiq_print_tasklet, (unsigned long)&jiq_data);
-
 
 /*
  * Do the printing; return non-zero if the task should be rescheduled.
@@ -94,7 +91,6 @@ static int jiq_print(struct clientdata *data)
 	return 1;
 }
 
-
 /*
  * Call jiq_print from a work queue
  */
@@ -110,8 +106,6 @@ static void jiq_print_wq(struct work_struct *work)
 	else
 		schedule_work(&data->dwork.work);
 }
-
-
 
 static int jiqwq_seq_show(struct seq_file *m, void *v)
 {
@@ -131,7 +125,6 @@ static int jiqwq_seq_show(struct seq_file *m, void *v)
 	return retval;
 }
 
-
 static int jiqwqdelay_seq_show(struct seq_file *m, void *v)
 {
 	struct clientdata *data = m->private;
@@ -150,9 +143,6 @@ static int jiqwqdelay_seq_show(struct seq_file *m, void *v)
 	return retval;
 }
 
-
-
-
 /*
  * Call jiq_print from a tasklet
  */
@@ -162,8 +152,6 @@ static void jiq_print_tasklet(unsigned long ptr)
 		return;
 	tasklet_schedule(&jiq_tasklet);
 }
-
-
 
 static int jiqtasklet_seq_show(struct seq_file *m, void *v)
 {
@@ -182,9 +170,6 @@ static int jiqtasklet_seq_show(struct seq_file *m, void *v)
 	return retval;
 }
 
-
-
-
 /*
  * This one, instead, tests out the timers.
  */
@@ -200,10 +185,10 @@ static void jiq_timedout(unsigned long ptr)
 	add_timer(&jiq_timer);
 }
 
-
 static int jiqtimer_seq_show(struct seq_file *m, void *v)
 {
 	struct clientdata *data = m->private;
+	int retval;
 
 	data->seq_file = m;
 	data->jiffies = jiffies;
@@ -217,10 +202,11 @@ static int jiqtimer_seq_show(struct seq_file *m, void *v)
 
 	jiq_print(data);   /* print and go to sleep */
 	add_timer(&jiq_timer);
-	wait_event_interruptible(jiq_wait, !data->count);
-	del_timer_sync(&jiq_timer);  /* in case a signal woke us up */
+	retval = wait_event_interruptible(jiq_wait, !data->count);
+	if (retval < 0)
+		del_timer_sync(&jiq_timer);  /* in case a signal woke us up */
 
-	return 0;
+	return retval;
 }
 
 static int jiq_single_open(struct inode *inode, struct file *file)
@@ -272,7 +258,6 @@ static void jiq_cleanup(void)
 	remove_proc_entry("jiqtimer", NULL);
 	remove_proc_entry("jiqtasklet", NULL);
 }
-
 
 module_init(jiq_init);
 module_exit(jiq_cleanup);
