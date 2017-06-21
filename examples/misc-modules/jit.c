@@ -35,7 +35,6 @@
  */
 
 static int delay = HZ; /* the default delay, expressed in jiffies */
-
 module_param(delay, int, 0);
 
 MODULE_AUTHOR("Alessandro Rubini");
@@ -60,7 +59,7 @@ static int sleep_seq_show(struct seq_file *m, void *v)
 	long remaining;
 	int retval = 0;
 
-	init_waitqueue_head (&wait);
+	init_waitqueue_head(&wait);
 	j0 = jiffies;
 	j1 = j0 + delay;
 
@@ -91,6 +90,9 @@ static int sleep_seq_show(struct seq_file *m, void *v)
 	return retval;
 }
 
+/*
+ * This file, on the other hand, returns the current time forever
+ */
 static int currentime_seq_show(struct seq_file *m, void *v)
 {
 	struct timeval tv1;
@@ -113,9 +115,6 @@ static int currentime_seq_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-/*
- * This file, on the other hand, returns the current time forever
- */
 static void *dummy_seq_start(struct seq_file *m, loff_t *pos)
 {
 	return (void *)1;
@@ -136,7 +135,6 @@ static struct seq_operations sleep_seq_ops = {
 	.next = dummy_seq_next,
 	.show = sleep_seq_show,
 };
-
 
 static struct seq_operations currentime_seq_ops = {
 	.start = dummy_seq_start,
@@ -162,7 +160,9 @@ struct jit_data {
 	struct seq_file *seq_file;
 	int loops;
 };
-#define JIT_ASYNC_LOOPS 5
+
+static int loops = 5;
+module_param(loops, int, 0);
 
 static void jit_timer_fn(unsigned long arg)
 {
@@ -193,7 +193,7 @@ static int jitimer_seq_show(struct seq_file *m, void *v)
 		return -ENOMEM;
 
 	init_timer(&data->timer);
-	init_waitqueue_head (&data->wait);
+	init_waitqueue_head(&data->wait);
 
 	/* write the first lines in the buffer */
 	seq_printf(m, "   time   delta  inirq    pid   cpu command\n");
@@ -204,7 +204,7 @@ static int jitimer_seq_show(struct seq_file *m, void *v)
 	/* fill the data for our timer function */
 	data->prevjiffies = j;
 	data->seq_file = m;
-	data->loops = JIT_ASYNC_LOOPS;
+	data->loops = loops;
 	
 	/* register the timer */
 	data->timer.data = (unsigned long)data;
@@ -251,7 +251,7 @@ static int jitasklet_seq_show(struct seq_file *m, void *v)
 	if (!data)
 		return -ENOMEM;
 
-	init_waitqueue_head (&data->wait);
+	init_waitqueue_head(&data->wait);
 
 	/* write the first lines in the buffer */
 	seq_printf(m, "   time   delta  inirq    pid   cpu command\n");
@@ -262,7 +262,7 @@ static int jitasklet_seq_show(struct seq_file *m, void *v)
 	/* fill the data for our tasklet function */
 	data->prevjiffies = j;
 	data->seq_file = m;
-	data->loops = JIT_ASYNC_LOOPS;
+	data->loops = loops;
 	
 	/* register the tasklet */
 	tasklet_init(&data->tlet, jit_tasklet_fn, (unsigned long)data);
