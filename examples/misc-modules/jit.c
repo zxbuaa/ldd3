@@ -102,7 +102,7 @@ static int currentime_seq_show(struct seq_file *m, void *v)
 	j1 = jiffies;
 	j2 = get_jiffies_64();
 	do_gettimeofday(&tv1);
-	tv2 = current_kernel_time();
+	getnstimeofday(&tv2);
 
 	/* print */
 	seq_printf(m, "0x%08lx 0x%016Lx %10i.%06i\n"
