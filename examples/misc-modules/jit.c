@@ -118,23 +118,16 @@ static int currentime_seq_show(struct seq_file *m, void *v)
  */
 static void *dummy_seq_start(struct seq_file *m, loff_t *pos)
 {
-	loff_t *p = kmalloc(sizeof(loff_t), GFP_KERNEL);
-	if (!p)
-		return NULL;
-	*p = *pos;
-	return p;
+	return (void *)1;
 }
 
 static void *dummy_seq_next(struct seq_file *m, void *v, loff_t *pos)
 {
-	loff_t *p = v;
-	*pos = ++(*p);
-	return p;
+	return (void *)1;
 }
 
 static void dummy_seq_stop(struct seq_file *m, void *v)
 {
-	kfree(v);
 }
 
 static struct seq_operations sleep_seq_ops = {
