@@ -27,13 +27,3 @@ clean:
 
 endif
 
-
-
-
-depend .depend dep:
-	$(CC) $(ccflags-y) -M *.c > .depend
-
-
-ifeq (.depend,$(wildcard .depend))
-include .depend
-endif

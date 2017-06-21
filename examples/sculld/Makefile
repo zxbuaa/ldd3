@@ -27,21 +27,10 @@ PWD       := $(shell pwd)
 modules:
 	cp ../lddbus/Module.symvers .
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD) modules
+install:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD) modules_install
 clean:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD) clean
 
 endif
 
-
-install:
-	install -d $(INSTALLDIR)
-	install -c $(TARGET).o $(INSTALLDIR)
-
-
-
-depend .depend dep:
-	$(CC) $(ccflag-y) -M *.c > .depend
-
-ifeq (.depend,$(wildcard .depend))
-include .depend
-endif

@@ -26,21 +26,10 @@ PWD       := $(shell pwd)
 
 modules:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD) modules
-
-endif
-
-
 install:
-	install -d $(INSTALLDIR)
-	install -c $(TARGET).o $(INSTALLDIR)
-
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD) modules_install
 clean:
-	rm -rf *.o *~ core .depend .*.cmd *.ko *.mod.c .tmp_versions
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) LDDINC=$(PWD) clean
 
-
-depend .depend dep:
-	$(CC) $(CFLAGS) -M *.c > .depend
-
-ifeq (.depend,$(wildcard .depend))
-include .depend
 endif
+

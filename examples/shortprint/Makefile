@@ -15,17 +15,8 @@ PWD       := $(shell pwd)
 
 default:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
-
-endif
-
-
 clean:
-	rm -rf *.o *~ core .depend .*.cmd *.ko *.mod.c .tmp_versions
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
 
-depend .depend dep:
-	$(CC) $(CFLAGS) -M *.c > .depend
-
-
-ifeq (.depend,$(wildcard .depend))
-include .depend
 endif
+
