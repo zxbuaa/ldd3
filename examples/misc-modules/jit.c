@@ -87,13 +87,10 @@ static int sleep_seq_show(struct seq_file *m, void *v)
 	}
 	j1 = jiffies; /* actual value after we delayed */
 
-	seq_printf(m, "%9li %9li\n", j0, j1);
+	seq_printf(m, "%9li %9li %9li\n", j0, j1, j1 - j0);
 	return retval;
 }
 
-/*
- * This file, on the other hand, returns the current time forever
- */
 static int currentime_seq_show(struct seq_file *m, void *v)
 {
 	struct timeval tv1;
@@ -115,6 +112,45 @@ static int currentime_seq_show(struct seq_file *m, void *v)
 		       (int) tv2.tv_sec, (int) tv2.tv_nsec);
 	return 0;
 }
+
+/*
+ * This file, on the other hand, returns the current time forever
+ */
+static void *dummy_seq_start(struct seq_file *m, loff_t *pos)
+{
+	loff_t *p = kmalloc(sizeof(loff_t), GFP_KERNEL);
+	if (!p)
+		return NULL;
+	*p = *pos;
+	return p;
+}
+
+static void *dummy_seq_next(struct seq_file *m, void *v, loff_t *pos)
+{
+	loff_t *p = v;
+	*pos = ++(*p);
+	return p;
+}
+
+static void dummy_seq_stop(struct seq_file *m, void *v)
+{
+	kfree(v);
+}
+
+static struct seq_operations sleep_seq_ops = {
+	.start = dummy_seq_start,
+	.stop = dummy_seq_stop,
+	.next = dummy_seq_next,
+	.show = sleep_seq_show,
+};
+
+
+static struct seq_operations currentime_seq_ops = {
+	.start = dummy_seq_start,
+	.stop = dummy_seq_stop,
+	.next = dummy_seq_next,
+	.show = currentime_seq_show,
+};
 
 /*
  * The timer example follows
@@ -251,22 +287,40 @@ static int jitasklet_seq_show(struct seq_file *m, void *v)
 	return retval;
 }
 
-static int jit_single_open(struct inode *inode, struct file *file)
+static int jit_seq_open(struct inode *inode, struct file *file)
 {
 	unsigned char *name = file->f_path.dentry->d_iname;
 	int ret = 0;
 
 	if (!strcmp(name, "currentime"))
-		ret = single_open(file, currentime_seq_show, NULL);
-	else if (!strcmp(name, "jitbusy"))
-		ret = single_open(file, sleep_seq_show, (void *)JIT_BUSY);
-	else if (!strcmp(name, "jitsched"))
-		ret = single_open(file, sleep_seq_show, (void *)JIT_SCHED);
-	else if (!strcmp(name, "jitqueue"))
-		ret = single_open(file, sleep_seq_show, (void *)JIT_QUEUE);
-	else if (!strcmp(name, "jitschedto"))
-		ret = single_open(file, sleep_seq_show, (void *)JIT_SCHEDTO);
-	else if (!strcmp(name, "jitimer"))
+		ret = seq_open(file, &currentime_seq_ops);
+	else if (!strcmp(name, "jitbusy")) {
+		ret = seq_open(file, &sleep_seq_ops);
+		if (!ret)
+			((struct seq_file *)file->private_data)->private = (void *)JIT_BUSY;
+	} else if (!strcmp(name, "jitsched")) {
+		ret = seq_open(file, &sleep_seq_ops);
+		if (!ret)
+			((struct seq_file *)file->private_data)->private = (void *)JIT_SCHED;
+	} else if (!strcmp(name, "jitqueue")) {
+		ret = seq_open(file, &sleep_seq_ops);
+		if (!ret)
+			((struct seq_file *)file->private_data)->private = (void *)JIT_QUEUE;
+	} else if (!strcmp(name, "jitschedto")) {
+		ret = seq_open(file, &sleep_seq_ops);
+		if (!ret)
+			((struct seq_file *)file->private_data)->private = (void *)JIT_SCHEDTO;
+	}
+
+	return ret;
+}
+
+static int jit_single_open(struct inode *inode, struct file *file)
+{
+	unsigned char *name = file->f_path.dentry->d_iname;
+	int ret = 0;
+
+	if (!strcmp(name, "jitimer"))
 		ret = single_open(file, jitimer_seq_show, NULL);
 	else if (!strcmp(name, "jitasklet"))
 		ret = single_open(file, jitasklet_seq_show, NULL);
@@ -276,7 +330,15 @@ static int jit_single_open(struct inode *inode, struct file *file)
 	return ret;
 }
 
-static struct file_operations jit_fops = {
+static struct file_operations jit_seq_fops = {
+	.owner = THIS_MODULE,
+	.open = jit_seq_open,
+	.release = seq_release,
+	.llseek = seq_lseek,
+	.read = seq_read,
+};
+
+static struct file_operations jit_single_fops = {
 	.owner = THIS_MODULE,
 	.open = jit_single_open,
 	.release = single_release,
@@ -286,15 +348,15 @@ static struct file_operations jit_fops = {
 
 static int __init jit_init(void)
 {
-	proc_create("currentime", 0, NULL, &jit_fops);
-	proc_create("jitbusy", 0, NULL, &jit_fops);
-	proc_create("jitsched", 0, NULL, &jit_fops);
-	proc_create("jitqueue", 0, NULL, &jit_fops);
-	proc_create("jitschedto", 0, NULL, &jit_fops);
+	proc_create("currentime", 0, NULL, &jit_seq_fops);
+	proc_create("jitbusy", 0, NULL, &jit_seq_fops);
+	proc_create("jitsched", 0, NULL, &jit_seq_fops);
+	proc_create("jitqueue", 0, NULL, &jit_seq_fops);
+	proc_create("jitschedto", 0, NULL, &jit_seq_fops);
 
-	proc_create("jitimer", 0, NULL, &jit_fops);
-	proc_create("jitasklet", 0, NULL, &jit_fops);
-	proc_create("jitasklethi", 0, NULL, &jit_fops);
+	proc_create("jitimer", 0, NULL, &jit_single_fops);
+	proc_create("jitasklet", 0, NULL, &jit_single_fops);
+	proc_create("jitasklethi", 0, NULL, &jit_single_fops);
 
 	return 0; /* success */
 }
