@@ -61,6 +61,7 @@ static struct clientdata {
 	unsigned long jiffies;
 	long delay;
 	int count;
+	bool stopped;
 } jiq_data;
 
 static void jiq_print_tasklet(unsigned long);
@@ -73,7 +74,7 @@ static int jiq_print(struct clientdata *data)
 {
 	unsigned long j = jiffies;
 
-	if (!data->count) {
+	if (!data->count || data->stopped) {
 		wake_up_interruptible(&jiq_wait);
 		return 0;
 	}
@@ -116,11 +117,14 @@ static int jiqwq_seq_show(struct seq_file *m, void *v)
 	data->jiffies = jiffies;      /* initial time */
 	data->delay = 0;
 	data->count = max_count;
+	data->stopped = false;
 
 	schedule_work(&data->dwork.work);
 	retval = wait_event_interruptible(jiq_wait, !data->count);
-	if (retval < 0)
+	if (retval < 0) {
+		data->stopped = true;
 		cancel_work_sync(&data->dwork.work);
+	}
 
 	return retval;
 }
@@ -134,11 +138,14 @@ static int jiqwqdelay_seq_show(struct seq_file *m, void *v)
 	data->jiffies = jiffies;      /* initial time */
 	data->delay = delay;
 	data->count = max_count;
+	data->stopped = false;
     
 	schedule_delayed_work(&data->dwork, delay);
 	retval = wait_event_interruptible(jiq_wait, !data->count);
-	if (retval < 0)
+	if (retval < 0) {
+		data->stopped = true;
 		cancel_delayed_work_sync(&data->dwork);
+	}
 
 	return retval;
 }
@@ -161,11 +168,14 @@ static int jiqtasklet_seq_show(struct seq_file *m, void *v)
 	data->seq_file = m;
 	data->jiffies = jiffies;      /* initial time */
 	data->count = max_count;
+	data->stopped = false;
 
 	tasklet_schedule(&jiq_tasklet);
 	retval = wait_event_interruptible(jiq_wait, !data->count);
-	if (retval < 0)
+	if (retval < 0) {
+		data->stopped = true;
 		tasklet_kill(&jiq_tasklet);
+	}
 
 	return retval;
 }
@@ -194,6 +204,7 @@ static int jiqtimer_seq_show(struct seq_file *m, void *v)
 	data->jiffies = jiffies;
 	data->delay = delay;
 	data->count = max_count;
+	data->stopped = false;
 
 	init_timer(&jiq_timer);              /* init the timer structure */
 	jiq_timer.function = jiq_timedout;
@@ -203,8 +214,10 @@ static int jiqtimer_seq_show(struct seq_file *m, void *v)
 	jiq_print(data);   /* print and go to sleep */
 	add_timer(&jiq_timer);
 	retval = wait_event_interruptible(jiq_wait, !data->count);
-	if (retval < 0)
+	if (retval < 0) {
+		data->stopped = true;
 		del_timer_sync(&jiq_timer);  /* in case a signal woke us up */
+	}
 
 	return retval;
 }

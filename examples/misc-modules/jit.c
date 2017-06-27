@@ -159,6 +159,7 @@ struct jit_data {
 	unsigned long prevjiffies;
 	struct seq_file *seq_file;
 	int loops;
+	bool stopped;
 };
 
 static int loops = 5;
@@ -172,7 +173,7 @@ static void jit_timer_fn(unsigned long arg)
 			     j, j - data->prevjiffies, in_interrupt() ? 1 : 0,
 			     current->pid, smp_processor_id(), current->comm);
 
-	if (--data->loops) {
+	if (--data->loops && !data->stopped) {
 		data->timer.expires += tdelay;
 		data->prevjiffies = j;
 		add_timer(&data->timer);
@@ -205,6 +206,7 @@ static int jitimer_seq_show(struct seq_file *m, void *v)
 	data->prevjiffies = j;
 	data->seq_file = m;
 	data->loops = loops;
+	data->stopped = false;
 	
 	/* register the timer */
 	data->timer.data = (unsigned long)data;
@@ -214,8 +216,10 @@ static int jitimer_seq_show(struct seq_file *m, void *v)
 
 	/* wait for the buffer to fill */
 	retval = wait_event_interruptible(data->wait, !data->loops);
-	if (retval)
+	if (retval) {
+		data->stopped = true;
 		del_timer_sync(&data->timer);
+	}
 	kfree(data);
 	return retval;
 }
@@ -228,7 +232,7 @@ static void jit_tasklet_fn(unsigned long arg)
 			     j, j - data->prevjiffies, in_interrupt() ? 1 : 0,
 			     current->pid, smp_processor_id(), current->comm);
 
-	if (--data->loops) {
+	if (--data->loops && !data->stopped) {
 		data->prevjiffies = j;
 		if (data->hi)
 			tasklet_hi_schedule(&data->tlet);
@@ -263,6 +267,7 @@ static int jitasklet_seq_show(struct seq_file *m, void *v)
 	data->prevjiffies = j;
 	data->seq_file = m;
 	data->loops = loops;
+	data->stopped = false;
 	
 	/* register the tasklet */
 	tasklet_init(&data->tlet, jit_tasklet_fn, (unsigned long)data);
@@ -274,8 +279,10 @@ static int jitasklet_seq_show(struct seq_file *m, void *v)
 
 	/* wait for the buffer to fill */
 	retval = wait_event_interruptible(data->wait, !data->loops);
-	if (retval)
+	if (retval) {
+		data->stopped = true;
 		tasklet_kill(&data->tlet);
+	}
 	kfree(data);
 	return retval;
 }
