@@ -191,8 +191,7 @@ static void jiq_timedout(unsigned long ptr)
 	struct clientdata *data = (struct clientdata *)ptr;
 	if (!jiq_print(data))
 		return;
-	jiq_timer.expires += data->delay;
-	add_timer(&jiq_timer);
+	mod_timer(&jiq_timer, jiq_timer.expires + data->delay);
 }
 
 static int jiqtimer_seq_show(struct seq_file *m, void *v)

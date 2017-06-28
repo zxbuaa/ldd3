@@ -174,9 +174,8 @@ static void jit_timer_fn(unsigned long arg)
 			     current->pid, smp_processor_id(), current->comm);
 
 	if (--data->loops && !data->stopped) {
-		data->timer.expires += tdelay;
 		data->prevjiffies = j;
-		add_timer(&data->timer);
+		mod_timer(&data->timer, data->timer.expires + tdelay);
 	} else {
 		wake_up_interruptible(&data->wait);
 	}
