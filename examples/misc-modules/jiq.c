@@ -59,9 +59,11 @@ static struct clientdata {
 	struct delayed_work dwork;
 	struct seq_file *seq_file;
 	unsigned long jiffies;
+	ktime_t ktime;
 	long delay;
 	int count;
 	bool stopped;
+	struct hrtimer hrtimer;
 } jiq_data;
 
 static void jiq_print_tasklet(unsigned long);
@@ -88,6 +90,28 @@ static int jiq_print(struct clientdata *data)
 			current->comm);
 
 	data->jiffies = j;
+	data->count--;
+	return 1;
+}
+
+static int jiq_print2(struct clientdata *data)
+{
+	ktime_t k = ktime_get();
+
+	if (!data->count || data->stopped) {
+		wake_up_interruptible(&jiq_wait);
+		return 0;
+	}
+	if (data->count == max_count)
+		seq_printf(data->seq_file, "    time  delta preempt   pid cpu command\n");
+
+	/* intr_count is only exported since 1.3.5, but 1.99.4 is needed anyways */
+	seq_printf(data->seq_file, "%9lli  %10lli     %6i %5i %3i %s\n",
+			k.tv64, ktime_sub(k, data->ktime).tv64,
+			preempt_count(), current->pid, smp_processor_id(),
+			current->comm);
+
+	data->ktime = k;
 	data->count--;
 	return 1;
 }
@@ -221,6 +245,42 @@ static int jiqtimer_seq_show(struct seq_file *m, void *v)
 	return retval;
 }
 
+static enum hrtimer_restart jiq_hrtimedout(struct hrtimer *hrtimer)
+{
+	struct clientdata *data = container_of(hrtimer, struct clientdata, hrtimer);
+	ktime_t period = ms_to_ktime(jiffies_to_msecs(data->delay));
+	if (!jiq_print2(data))
+		return HRTIMER_NORESTART;
+	hrtimer_forward_now(hrtimer, period);
+	return HRTIMER_RESTART;
+}
+
+static int jiqhrtimer_seq_show(struct seq_file *m, void *v)
+{
+	struct clientdata *data = m->private;
+	ktime_t period = ms_to_ktime(jiffies_to_msecs(delay));
+	int retval;
+
+	data->seq_file = m;
+	data->ktime = ktime_get();
+	data->delay = delay;
+	data->count = max_count;
+	data->stopped = false;
+
+	hrtimer_init(&data->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	data->hrtimer.function = jiq_hrtimedout;
+
+	jiq_print2(data);   /* print and go to sleep */
+	hrtimer_start(&data->hrtimer, period, HRTIMER_MODE_REL);
+	retval = wait_event_interruptible(jiq_wait, !data->count);
+	if (retval < 0) {
+		data->stopped = true;
+		hrtimer_cancel(&data->hrtimer);  /* in case a signal woke us up */
+	}
+
+	return retval;
+}
+
 static int jiq_single_open(struct inode *inode, struct file *file)
 {
 	unsigned char *name = file->f_path.dentry->d_iname;
@@ -232,6 +292,8 @@ static int jiq_single_open(struct inode *inode, struct file *file)
 		retval = single_open(file, jiqwqdelay_seq_show, (void *)&jiq_data);
 	else if (!strcmp(name, "jiqtimer"))
 		retval = single_open(file, jiqtimer_seq_show, (void *)&jiq_data);
+	else if (!strcmp(name, "jiqhrtimer"))
+		retval = single_open(file, jiqhrtimer_seq_show, (void *)&jiq_data);
 	else if (!strcmp(name, "jiqtasklet"))
 		retval = single_open(file, jiqtasklet_seq_show, (void *)&jiq_data);
 	return retval;
@@ -258,6 +320,7 @@ static int jiq_init(void)
 	proc_create("jiqwq", 0, NULL, &jiq_read_fops);
 	proc_create("jiqwqdelay", 0, NULL, &jiq_read_fops);
 	proc_create("jiqtimer", 0, NULL, &jiq_read_fops);
+	proc_create("jiqhrtimer", 0, NULL, &jiq_read_fops);
 	proc_create("jiqtasklet", 0, NULL, &jiq_read_fops);
 
 	return 0; /* succeed */
@@ -268,6 +331,7 @@ static void jiq_cleanup(void)
 	remove_proc_entry("jiqwq", NULL);
 	remove_proc_entry("jiqwqdelay", NULL);
 	remove_proc_entry("jiqtimer", NULL);
+	remove_proc_entry("jiqhrtimer", NULL);
 	remove_proc_entry("jiqtasklet", NULL);
 }
 
