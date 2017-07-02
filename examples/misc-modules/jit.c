@@ -21,6 +21,7 @@
 #include <linux/sched.h>
 #include <linux/time.h>
 #include <linux/timer.h>
+#include <linux/hrtimer.h>
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
@@ -153,10 +154,12 @@ module_param(tdelay, int, 0);
 /* This data structure used as "data" for the timer and tasklet functions */
 struct jit_data {
 	struct timer_list timer;
+	struct hrtimer hrtimer;
 	struct tasklet_struct tlet;
 	int hi; /* tasklet or tasklet_hi */
 	wait_queue_head_t wait;
 	unsigned long prevjiffies;
+	ktime_t prevktime;
 	struct seq_file *seq_file;
 	int loops;
 	bool stopped;
@@ -218,6 +221,62 @@ static int jitimer_seq_show(struct seq_file *m, void *v)
 	if (retval) {
 		data->stopped = true;
 		del_timer_sync(&data->timer);
+	}
+	kfree(data);
+	return retval;
+}
+
+static enum hrtimer_restart jit_hrtimer_fn(struct hrtimer *hrtimer)
+{
+	struct jit_data *data = container_of(hrtimer, struct jit_data, hrtimer);
+	ktime_t k = ktime_get();
+	seq_printf(data->seq_file, "%9lli  %10lli     %i    %6i   %i   %s\n",
+			     k.tv64, ktime_sub(k, data->prevktime).tv64, in_interrupt() ? 1 : 0,
+			     current->pid, smp_processor_id(), current->comm);
+
+	if (--data->loops && !data->stopped) {
+		data->prevktime = k;
+		hrtimer_forward(hrtimer, data->prevktime, ktime_set(0, jiffies_to_msecs(tdelay) * 1000000));
+		return HRTIMER_RESTART;
+	} else {
+		wake_up_interruptible(&data->wait);
+		return HRTIMER_NORESTART;
+	}
+}
+
+static int jithrtimer_seq_show(struct seq_file *m, void *v)
+{
+	struct jit_data *data;
+	ktime_t k;
+	int retval;
+
+	data = kmalloc(sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+	hrtimer_init(&data->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	init_waitqueue_head(&data->wait);
+
+	k = ktime_get();
+	seq_printf(m, "   time   delta  inirq    pid   cpu command\n");
+	seq_printf(m, "%9lli  %10lli     %i    %6i   %i   %s\n",
+			k.tv64, 0LL, in_interrupt() ? 1 : 0,
+			current->pid, smp_processor_id(), current->comm);
+
+	/* fill the data for our timer function */
+	data->prevktime = k;
+	data->seq_file = m;
+	data->loops = loops;
+	data->stopped = false;
+
+	/* register the timer */
+	data->hrtimer.function = jit_hrtimer_fn;
+	hrtimer_start(&data->hrtimer, ktime_set(0, jiffies_to_msecs(tdelay) * 1000000), HRTIMER_MODE_REL);
+
+	/* wait for the buffer to fill */
+	retval = wait_event_interruptible(data->wait, !data->loops);
+	if (retval) {
+		data->stopped = true;
+		hrtimer_cancel(&data->hrtimer);
 	}
 	kfree(data);
 	return retval;
@@ -321,6 +380,8 @@ static int jit_single_open(struct inode *inode, struct file *file)
 
 	if (!strcmp(name, "jitimer"))
 		ret = single_open(file, jitimer_seq_show, NULL);
+	else if (!strcmp(name, "jithrtimer"))
+		ret = single_open(file, jithrtimer_seq_show, NULL);
 	else if (!strcmp(name, "jitasklet"))
 		ret = single_open(file, jitasklet_seq_show, NULL);
 	else if (!strcmp(name, "jitasklethi"))
@@ -354,6 +415,7 @@ static int __init jit_init(void)
 	proc_create("jitschedto", 0, NULL, &jit_seq_fops);
 
 	proc_create("jitimer", 0, NULL, &jit_single_fops);
+	proc_create("jithrtimer", 0, NULL, &jit_single_fops);
 	proc_create("jitasklet", 0, NULL, &jit_single_fops);
 	proc_create("jitasklethi", 0, NULL, &jit_single_fops);
 
@@ -369,6 +431,7 @@ static void __exit jit_cleanup(void)
 	remove_proc_entry("jitschedto", NULL);
 
 	remove_proc_entry("jitimer", NULL);
+	remove_proc_entry("jithrtimer", NULL);
 	remove_proc_entry("jitasklet", NULL);
 	remove_proc_entry("jitasklethi", NULL);
 }
