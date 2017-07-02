@@ -251,7 +251,7 @@ static enum hrtimer_restart jiq_hrtimedout(struct hrtimer *hrtimer)
 	ktime_t period = ms_to_ktime(jiffies_to_msecs(data->delay));
 	if (!jiq_print2(data))
 		return HRTIMER_NORESTART;
-	hrtimer_forward_now(hrtimer, period);
+	hrtimer_forward(hrtimer, hrtimer_get_expires(hrtimer), period);
 	return HRTIMER_RESTART;
 }
 

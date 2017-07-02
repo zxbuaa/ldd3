@@ -236,7 +236,8 @@ static enum hrtimer_restart jit_hrtimer_fn(struct hrtimer *hrtimer)
 
 	if (--data->loops && !data->stopped) {
 		data->prevktime = k;
-		hrtimer_forward(hrtimer, data->prevktime, ktime_set(0, jiffies_to_msecs(tdelay) * 1000000));
+		hrtimer_forward(hrtimer, hrtimer_get_expires(hrtimer),
+			ktime_set(0, jiffies_to_msecs(tdelay) * 1000000));
 		return HRTIMER_RESTART;
 	} else {
 		wake_up_interruptible(&data->wait);
