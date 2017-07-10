@@ -237,7 +237,7 @@ static enum hrtimer_restart jit_hrtimer_fn(struct hrtimer *hrtimer)
 	if (--data->loops && !data->stopped) {
 		data->prevktime = k;
 		hrtimer_forward(hrtimer, hrtimer_get_expires(hrtimer),
-			ktime_set(0, jiffies_to_msecs(tdelay) * 1000000));
+			ms_to_ktime(jiffies_to_msecs(tdelay)));
 		return HRTIMER_RESTART;
 	} else {
 		wake_up_interruptible(&data->wait);
@@ -271,7 +271,7 @@ static int jithrtimer_seq_show(struct seq_file *m, void *v)
 
 	/* register the timer */
 	data->hrtimer.function = jit_hrtimer_fn;
-	hrtimer_start(&data->hrtimer, ktime_set(0, jiffies_to_msecs(tdelay) * 1000000), HRTIMER_MODE_REL);
+	hrtimer_start(&data->hrtimer, ms_to_ktime(jiffies_to_msecs(tdelay)), HRTIMER_MODE_REL);
 
 	/* wait for the buffer to fill */
 	retval = wait_event_interruptible(data->wait, !data->loops);
