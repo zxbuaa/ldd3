@@ -52,7 +52,7 @@ static atomic_t scull_s_available = ATOMIC_INIT(1);
 
 static int scull_s_open(struct inode *inode, struct file *filp)
 {
-	struct scull_dev *dev = &scull_s_device; /* device information */
+	struct scull_dev *dev = container_of(inode->i_cdev, struct scull_dev, cdev);
 
 	if (! atomic_dec_and_test (&scull_s_available)) {
 		atomic_inc(&scull_s_available);
@@ -102,7 +102,7 @@ static DEFINE_SPINLOCK(scull_u_lock);
 
 static int scull_u_open(struct inode *inode, struct file *filp)
 {
-	struct scull_dev *dev = &scull_u_device; /* device information */
+	struct scull_dev *dev = container_of(inode->i_cdev, struct scull_dev, cdev);
 	const struct cred *cred = current_cred();
 
 	spin_lock(&scull_u_lock);
@@ -176,7 +176,7 @@ static inline int scull_w_available(void)
 
 static int scull_w_open(struct inode *inode, struct file *filp)
 {
-	struct scull_dev *dev = &scull_w_device; /* device information */
+	struct scull_dev *dev = container_of(inode->i_cdev, struct scull_dev, cdev);
 	const struct cred *cred = current_cred();
 
 	spin_lock(&scull_w_lock);
