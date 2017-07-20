@@ -569,7 +569,7 @@ static void scull_setup_cdev(struct scull_dev *dev, int index)
 	int err, devno = MKDEV(scull_major, scull_minor + index);
     
 	cdev_init(&dev->cdev, &scull_fops);
-	dev->cdev.owner = THIS_MODULE;
+	dev->cdev.owner = scull_fops.owner;
 	/* A scull_dev corresponds to one cdev */
 	err = cdev_add(&dev->cdev, devno, 1);
 	/* Fail gracefully if need be */

@@ -60,7 +60,9 @@ static int scull_s_open(struct inode *inode, struct file *filp)
 	}
 
 	/* then, everything else is copied from the bare scull device */
-	if ( (filp->f_flags & O_ACCMODE) == O_WRONLY)
+	if (((filp->f_flags & O_ACCMODE) == O_WRONLY ||
+	     (filp->f_flags & O_ACCMODE) == O_RDWR) &&
+	    (filp->f_flags & O_TRUNC))
 		scull_trim(dev);
 	filp->private_data = dev;
 	return 0;          /* success */
@@ -96,7 +98,7 @@ struct file_operations scull_sngl_fops = {
 static struct scull_dev scull_u_device;
 static int scull_u_count;	/* initialized to 0 by default */
 static kuid_t scull_u_owner;	/* initialized to 0 by default */
-DEFINE_SPINLOCK(scull_u_lock);
+static DEFINE_SPINLOCK(scull_u_lock);
 
 static int scull_u_open(struct inode *inode, struct file *filp)
 {
@@ -118,9 +120,10 @@ static int scull_u_open(struct inode *inode, struct file *filp)
 	scull_u_count++;
 	spin_unlock(&scull_u_lock);
 
-/* then, everything else is copied from the bare scull device */
-
-	if ((filp->f_flags & O_ACCMODE) == O_WRONLY)
+	/* then, everything else is copied from the bare scull device */
+	if (((filp->f_flags & O_ACCMODE) == O_WRONLY ||
+	     (filp->f_flags & O_ACCMODE) == O_RDWR) &&
+	    (filp->f_flags & O_TRUNC))
 		scull_trim(dev);
 	filp->private_data = dev;
 	return 0;          /* success */
@@ -159,7 +162,7 @@ static struct scull_dev scull_w_device;
 static int scull_w_count;	/* initialized to 0 by default */
 static kuid_t scull_w_owner;	/* initialized to 0 by default */
 static DECLARE_WAIT_QUEUE_HEAD(scull_w_wait);
-DEFINE_SPINLOCK(scull_w_lock);
+static DEFINE_SPINLOCK(scull_w_lock);
 
 static inline int scull_w_available(void)
 {
@@ -190,7 +193,9 @@ static int scull_w_open(struct inode *inode, struct file *filp)
 	spin_unlock(&scull_w_lock);
 
 	/* then, everything else is copied from the bare scull device */
-	if ((filp->f_flags & O_ACCMODE) == O_WRONLY)
+	if (((filp->f_flags & O_ACCMODE) == O_WRONLY ||
+	     (filp->f_flags & O_ACCMODE) == O_RDWR) &&
+	    (filp->f_flags & O_TRUNC))
 		scull_trim(dev);
 	filp->private_data = dev;
 	return 0;          /* success */
@@ -241,7 +246,7 @@ struct scull_listitem {
 
 /* The list of devices, and a lock to protect it */
 static LIST_HEAD(scull_c_list);
-DEFINE_SPINLOCK(scull_c_lock);
+static DEFINE_SPINLOCK(scull_c_lock);
 
 /* A placeholder scull_dev which really just holds the cdev stuff. */
 static struct scull_dev scull_c_device;   
@@ -257,12 +262,11 @@ static struct scull_dev *scull_c_lookfor_device(dev_t key)
 	}
 
 	/* not found */
-	lptr = kmalloc(sizeof(struct scull_listitem), GFP_KERNEL);
+	lptr = kzalloc(sizeof(struct scull_listitem), GFP_KERNEL);
 	if (!lptr)
 		return NULL;
 
 	/* initialize the device */
-	memset(lptr, 0, sizeof(struct scull_listitem));
 	lptr->key = key;
 	scull_trim(&(lptr->device)); /* initialize it */
 	mutex_init(&lptr->device.lock);
@@ -293,7 +297,9 @@ static int scull_c_open(struct inode *inode, struct file *filp)
 		return -ENOMEM;
 
 	/* then, everything else is copied from the bare scull device */
-	if ( (filp->f_flags & O_ACCMODE) == O_WRONLY)
+	if (((filp->f_flags & O_ACCMODE) == O_WRONLY ||
+	     (filp->f_flags & O_ACCMODE) == O_RDWR) &&
+	    (filp->f_flags & O_TRUNC))
 		scull_trim(dev);
 	filp->private_data = dev;
 	return 0;          /* success */
@@ -338,7 +344,7 @@ static struct scull_adev_info {
 	{ "scullwuid", &scull_w_device, &scull_wusr_fops },
 	{ "sullpriv", &scull_c_device, &scull_priv_fops }
 };
-#define SCULL_N_ADEVS 4
+#define SCULL_N_ADEVS (sizeof(scull_access_devs) / sizeof(scull_access_devs[0]))
 
 /*
  * Set up a single device.
@@ -355,13 +361,11 @@ static void scull_access_setup (dev_t devno, struct scull_adev_info *devinfo)
 
 	/* Do the cdev stuff. */
 	cdev_init(&dev->cdev, devinfo->fops);
-	kobject_set_name(&dev->cdev.kobj, devinfo->name);
-	dev->cdev.owner = THIS_MODULE;
+	dev->cdev.owner = devinfo->fops->owner;
 	err = cdev_add (&dev->cdev, devno, 1);
         /* Fail gracefully if need be */
 	if (err) {
 		printk(KERN_NOTICE "Error %d adding %s\n", err, devinfo->name);
-		kobject_put(&dev->cdev.kobj);
 	} else
 		printk(KERN_NOTICE "%s registered at %x\n", devinfo->name, devno);
 }
@@ -398,7 +402,7 @@ void scull_access_cleanup(void)
 	for (i = 0; i < SCULL_N_ADEVS; i++) {
 		struct scull_dev *dev = scull_access_devs[i].sculldev;
 		cdev_del(&dev->cdev);
-		scull_trim(scull_access_devs[i].sculldev);
+		scull_trim(dev);
 	}
 
     	/* And all the cloned devices */
