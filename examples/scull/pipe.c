@@ -367,13 +367,13 @@ int scull_p_init(dev_t firstdev)
 	result = register_chrdev_region(firstdev, scull_p_nr_devs, "scullp");
 	if (result < 0) {
 		printk(KERN_NOTICE "Unable to get scullp region, error %d\n", result);
-		return result;
+		return 0;
 	}
 	scull_p_devno = firstdev;
 	scull_p_devices = kmalloc(scull_p_nr_devs * sizeof(struct scull_pipe), GFP_KERNEL);
 	if (scull_p_devices == NULL) {
 		unregister_chrdev_region(firstdev, scull_p_nr_devs);
-		return -ENOMEM;
+		return 0;
 	}
 	memset(scull_p_devices, 0, scull_p_nr_devs * sizeof(struct scull_pipe));
 	for (i = 0; i < scull_p_nr_devs; i++) {
