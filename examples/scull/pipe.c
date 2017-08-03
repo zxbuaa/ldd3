@@ -79,7 +79,8 @@ static int scull_p_open(struct inode *inode, struct file *filp)
 	}
 	dev->buffersize = scull_p_buffer;
 	dev->end = dev->buffer + dev->buffersize;
-	dev->rp = dev->wp = dev->buffer; /* rd and wr from the beginning */
+	if (!(dev->nreaders || dev->nwriters)) /* only reset rp and wp when 1st open */
+		dev->rp = dev->wp = dev->buffer; /* rd and wr from the beginning */
 
 	/* use f_mode,not  f_flags: it's cleaner (fs/open.c tells why) */
 	if (filp->f_mode & FMODE_READ)
@@ -104,9 +105,11 @@ static int scull_p_release(struct inode *inode, struct file *filp)
 		dev->nreaders--;
 	if (filp->f_mode & FMODE_WRITE)
 		dev->nwriters--;
-	if (dev->nreaders + dev->nwriters == 0) {
+	if (!(dev->nreaders || dev->nwriters)) {
 		kfree(dev->buffer);
-		dev->buffer = NULL; /* the other fields are not checked on open */
+		/* clear all fields or /proc/scullpipe might give wrong information */
+		dev->end = dev->buffer = NULL;
+		dev->buffersize = 0;
 	}
 	mutex_unlock(&dev->lock);
 	return 0;
@@ -348,7 +351,7 @@ static void scull_p_setup_cdev(struct scull_pipe *dev, int index)
 	int err, devno = scull_p_devno + index;
     
 	cdev_init(&dev->cdev, &scull_pipe_fops);
-	dev->cdev.owner = THIS_MODULE;
+	dev->cdev.owner = scull_pipe_fops.owner;
 	err = cdev_add (&dev->cdev, devno, 1);
 	/* Fail gracefully if need be */
 	if (err)
@@ -370,12 +373,11 @@ int scull_p_init(dev_t firstdev)
 		return 0;
 	}
 	scull_p_devno = firstdev;
-	scull_p_devices = kmalloc(scull_p_nr_devs * sizeof(struct scull_pipe), GFP_KERNEL);
+	scull_p_devices = kzalloc(scull_p_nr_devs * sizeof(struct scull_pipe), GFP_KERNEL);
 	if (scull_p_devices == NULL) {
 		unregister_chrdev_region(firstdev, scull_p_nr_devs);
 		return 0;
 	}
-	memset(scull_p_devices, 0, scull_p_nr_devs * sizeof(struct scull_pipe));
 	for (i = 0; i < scull_p_nr_devs; i++) {
 		init_waitqueue_head(&(scull_p_devices[i].inq));
 		init_waitqueue_head(&(scull_p_devices[i].outq));
