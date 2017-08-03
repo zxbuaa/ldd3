@@ -99,7 +99,7 @@ static int scull_p_release(struct inode *inode, struct file *filp)
 	struct scull_pipe *dev = filp->private_data;
 
 	/* remove this filp from the asynchronously notified filp's */
-	scull_p_fasync(-1, filp, 0);
+	/* scull_p_fasync(-1, filp, 0); not needed, kernel will do this */
 	mutex_lock(&dev->lock);
 	if (filp->f_mode & FMODE_READ)
 		dev->nreaders--;
@@ -300,6 +300,7 @@ static int scull_p_fasync(int fd, struct file *filp, int mode)
 {
 	struct scull_pipe *dev = filp->private_data;
 
+	PDEBUG("%s: %s %d\n", current->comm, __func__, fd);
 	return fasync_helper(fd, filp, mode, &dev->async_queue);
 }
 
