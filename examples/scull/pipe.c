@@ -124,6 +124,7 @@ static ssize_t scull_p_read (struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
 	struct scull_pipe *dev = filp->private_data;
+	size_t part1, part2, tmp, copied = 0;
 
 	if (mutex_lock_interruptible(&dev->lock))
 		return -ERESTARTSYS;
@@ -140,23 +141,43 @@ static ssize_t scull_p_read (struct file *filp, char __user *buf, size_t count,
 			return -ERESTARTSYS;
 	}
 	/* ok, data is there, return something */
-	if (dev->wp > dev->rp)
-		count = min(count, (size_t)(dev->wp - dev->rp));
-	else /* the write pointer has wrapped, return data up to dev->end */
-		count = min(count, (size_t)(dev->end - dev->rp));
-	if (copy_to_user(buf, dev->rp, count)) {
+	if (dev->wp > dev->rp) {
+		part1 = (size_t)(dev->wp - dev->rp);
+		part2 = 0;
+	} else {
+		part1 = (size_t)(dev->end - dev->rp);
+		part2 = (size_t)(dev->wp - dev->buffer);
+	}
+	tmp = min(count, part1);
+	PDEBUG("Part1: going to read %li bytes from %p to %p\n", (long)tmp, dev->rp, buf);
+	if (copy_to_user(buf, dev->rp, tmp)) {
 		mutex_unlock(&dev->lock);
 		return -EFAULT;
 	}
-	dev->rp += count;
+	dev->rp += tmp;
 	if (dev->rp == dev->end)
 		dev->rp = dev->buffer; /* wrapped */
+	buf += tmp;
+	count -= tmp;
+	copied += tmp;
+	if (count && part2) {
+		tmp = min(count, part2);
+		PDEBUG("Part2: going to read %li bytes from %p to %p\n", (long)tmp, dev->rp, buf);
+		if (copy_to_user(buf, dev->rp, tmp))
+			goto copy_part2_fail;
+		dev->rp += tmp;
+		buf += tmp;
+		count -= tmp;
+		copied += tmp;
+	}
+
+copy_part2_fail:
 	mutex_unlock(&dev->lock);
 
 	/* finally, awake any writers and return */
 	wake_up_interruptible(&dev->outq);
-	PDEBUG("\"%s\" did read %li bytes\n",current->comm, (long)count);
-	return count;
+	PDEBUG("\"%s\" did read %li bytes\n",current->comm, (long)copied);
+	return copied;
 }
 
 /* Wait for space for writing; caller must hold device mutex.  On
@@ -194,6 +215,7 @@ static ssize_t scull_p_write(struct file *filp, const char __user *buf, size_t c
                 loff_t *f_pos)
 {
 	struct scull_pipe *dev = filp->private_data;
+	size_t part1, part2, tmp, copied = 0;
 	int result;
 
 	if (mutex_lock_interruptible(&dev->lock))
@@ -206,18 +228,37 @@ static ssize_t scull_p_write(struct file *filp, const char __user *buf, size_t c
 
 	/* ok, space is there, accept something */
 	count = min(count, (size_t)spacefree(dev));
-	if (dev->wp >= dev->rp)
-		count = min(count, (size_t)(dev->end - dev->wp)); /* to end-of-buf */
-	else /* the write pointer has wrapped, fill up to rp-1 */
-		count = min(count, (size_t)(dev->rp - dev->wp - 1));
-	PDEBUG("Going to accept %li bytes to %p from %p\n", (long)count, dev->wp, buf);
-	if (copy_from_user(dev->wp, buf, count)) {
+	if (dev->wp >= dev->rp) {
+		part1 = (size_t)(dev->end - dev->wp);
+		part2 = (size_t)(dev->rp - dev->buffer);
+	} else {
+		part1 = (size_t)(dev->rp - dev->wp);
+		part2 = 0;
+	}
+	tmp = min(count, part1);
+	PDEBUG("Part1: going to write %li bytes to %p from %p\n", (long)tmp, dev->wp, buf);
+	if (copy_from_user(dev->wp, buf, tmp)) {
 		mutex_unlock(&dev->lock);
 		return -EFAULT;
 	}
-	dev->wp += count;
+	dev->wp += tmp;
 	if (dev->wp == dev->end)
 		dev->wp = dev->buffer; /* wrapped */
+	buf += tmp;
+	count -= tmp;
+	copied += tmp;
+	if (count && part2) {
+		tmp = min(count, part2);
+		PDEBUG("Part2: going to write %li bytes to %p from %p\n", (long)tmp, dev->wp, buf);
+		if (copy_from_user(dev->wp, buf, tmp))
+			goto copy_part2_fail;
+		dev->wp += tmp;
+		buf += tmp;
+		count -= tmp;
+		copied += tmp;
+	}
+
+copy_part2_fail:
 	mutex_unlock(&dev->lock);
 
 	/* finally, awake any reader */
@@ -226,8 +267,8 @@ static ssize_t scull_p_write(struct file *filp, const char __user *buf, size_t c
 	/* and signal asynchronous readers, explained late in chapter 5 */
 	if (dev->async_queue)
 		kill_fasync(&dev->async_queue, SIGIO, POLL_IN);
-	PDEBUG("\"%s\" did write %li bytes\n",current->comm, (long)count);
-	return count;
+	PDEBUG("\"%s\" did write %li bytes\n",current->comm, (long)copied);
+	return copied;
 }
 
 static unsigned int scull_p_poll(struct file *filp, poll_table *wait)
