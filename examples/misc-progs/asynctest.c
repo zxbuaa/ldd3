@@ -25,14 +25,13 @@ void sighandler(int signo)
 {
     if (signo==SIGIO)
         gotdata++;
-    return;
+    fprintf(stderr, "%s: %d\n", __func__, gotdata);
 }
 
 char buffer[4096];
 
 int main(int argc, char **argv)
 {
-    int count;
     struct sigaction action;
 
     memset(&action, 0, sizeof(action));
@@ -42,16 +41,24 @@ int main(int argc, char **argv)
     sigaction(SIGIO, &action, NULL);
 
     fcntl(STDIN_FILENO, F_SETOWN, getpid());
-    fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | FASYNC);
+    fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | FASYNC | O_NONBLOCK);
 
     while(1) {
+        int rsize;
         /* this only returns if a signal arrives */
         sleep(86400); /* one day */
         if (!gotdata)
             continue;
-        count=read(0, buffer, 4096);
-        /* buggy: if avail data is more than 4kbytes... */
-        write(1,buffer,count);
+
+        while ((rsize = read(STDIN_FILENO, buffer, 4096)) > 0) {
+            int wsize = 0;
+            fprintf(stderr, "%s: read %d\n", __func__, rsize);
+            while ((wsize += write(STDOUT_FILENO, buffer + wsize, rsize - wsize)) < rsize) {
+            }
+            fprintf(stderr, "%s: write %d\n", __func__, wsize);
+        }
+
         gotdata=0;
     }
+    exit(1);
 }
