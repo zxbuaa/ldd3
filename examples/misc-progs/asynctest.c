@@ -30,13 +30,13 @@ void sighandler(int signo)
 
 void sigaction_cb(int signo, siginfo_t *siginfo, void *context)
 {
-	if (signo == SIGIO)
-		gotdata++;
-	fprintf(stderr, "%s: from %s by uid=%d pid=%d\n", __func__,
-		siginfo->si_code == SI_USER ? "KILL" :
-		siginfo->si_code == SI_KERNEL ? "KERNEL" :
-		siginfo->si_code == SI_TKILL ? "TKILL" : "OTHER",
-		siginfo->si_uid, siginfo->si_pid);
+    if (signo == SIGIO)
+        gotdata++;
+    fprintf(stderr, "%s: from %s by uid=%d pid=%d\n", __func__,
+        siginfo->si_code == SI_USER ? "KILL" :
+        siginfo->si_code == SI_KERNEL ? "KERNEL" :
+        siginfo->si_code == SI_TKILL ? "TKILL" : "OTHER",
+        siginfo->si_uid, siginfo->si_pid);
 }
 
 char buffer[4096];
