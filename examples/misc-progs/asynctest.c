@@ -28,6 +28,17 @@ void sighandler(int signo)
     fprintf(stderr, "%s: %d\n", __func__, gotdata);
 }
 
+void sigaction_cb(int signo, siginfo_t *siginfo, void *context)
+{
+	if (signo == SIGIO)
+		gotdata++;
+	fprintf(stderr, "%s: from %s by uid=%d pid=%d\n", __func__,
+		siginfo->si_code == SI_USER ? "KILL" :
+		siginfo->si_code == SI_KERNEL ? "KERNEL" :
+		siginfo->si_code == SI_TKILL ? "TKILL" : "OTHER",
+		siginfo->si_uid, siginfo->si_pid);
+}
+
 char buffer[4096];
 
 int main(int argc, char **argv)
@@ -35,8 +46,10 @@ int main(int argc, char **argv)
     struct sigaction action;
 
     memset(&action, 0, sizeof(action));
-    action.sa_handler = sighandler;
-    action.sa_flags = 0;
+    // action.sa_handler = sighandler;
+    // action.sa_flags = 0;
+    action.sa_sigaction = sigaction_cb;
+    action.sa_flags = SA_SIGINFO;
 
     sigaction(SIGIO, &action, NULL);
 
